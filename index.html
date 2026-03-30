@@ -1354,9 +1354,97 @@
         animation: none !important;
       }
     }
+
+    /* One-time tap to unlock audio (mobile browsers); skipped if already done this session */
+    html.audio-prime-skip .audio-prime-overlay {
+      display: none !important;
+    }
+
+    .audio-prime-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: max(1rem, env(safe-area-inset-top)) 1.25rem max(1.25rem, env(safe-area-inset-bottom));
+      background: rgba(8, 4, 18, 0.58);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      transition: opacity 0.38s ease, visibility 0.38s ease;
+    }
+
+    .audio-prime-overlay.is-dimming {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .audio-prime-card {
+      appearance: none;
+      margin: 0;
+      width: 100%;
+      max-width: 17rem;
+      padding: clamp(1.15rem, 4vw, 1.55rem) clamp(1.35rem, 4.5vw, 1.75rem);
+      border-radius: clamp(14px, 3.2vw, 18px);
+      border: 1px solid rgba(232, 197, 71, 0.28);
+      background: rgba(12, 6, 24, 0.72);
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.04),
+        0 12px 40px rgba(0, 0, 0, 0.45),
+        0 0 32px rgba(92, 225, 255, 0.06);
+      cursor: pointer;
+      text-align: center;
+      font-family: var(--font-subtitle);
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .audio-prime-card:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 3px;
+    }
+
+    .audio-prime-title {
+      display: block;
+      font-size: clamp(0.72rem, 2.6vw, 0.82rem);
+      font-weight: 600;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: rgba(245, 240, 255, 0.92);
+      margin-bottom: 0.45rem;
+    }
+
+    .audio-prime-sub {
+      display: block;
+      font-size: clamp(0.68rem, 2.35vw, 0.76rem);
+      font-weight: 400;
+      letter-spacing: 0.08em;
+      color: rgba(232, 197, 71, 0.55);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .audio-prime-overlay {
+        transition-duration: 0.15s;
+      }
+    }
   </style>
 </head>
 <body>
+  <div id="audioPrimeOverlay" class="audio-prime-overlay">
+    <button type="button" class="audio-prime-card" id="audioPrimeBtn" aria-label="Enable sound and begin">
+      <span class="audio-prime-title">Tap to enable sound</span>
+      <span class="audio-prime-sub">Spin · win · ambience</span>
+    </button>
+  </div>
+  <script>
+    (function () {
+      try {
+        if (sessionStorage.getItem("wish-audio-primed") === "1") {
+          document.documentElement.classList.add("audio-prime-skip");
+        }
+      } catch (e) {}
+    })();
+  </script>
   <main class="stage" id="stage">
     <div class="reel-stack">
       <header class="reel-header">
@@ -1443,7 +1531,7 @@
       </div>
     </div>
   </main>
-  <audio id="slotWinSfx" preload="auto" src="src/slot-win.wav"></audio>
+  <audio id="slotWinSfx" preload="auto" src="slot-win.wav"></audio>
   <script>
     (function () {
       const reel = document.getElementById("reel");
@@ -1581,48 +1669,11 @@
       }
 
       var reelSpinCtx = null;
-      var slotWinAudioBuffer = null;
-      var slotWinDecodePromise = null;
-
       function ensureReelSpinCtx() {
         var AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return null;
         if (!reelSpinCtx) reelSpinCtx = new AC();
         return reelSpinCtx;
-      }
-
-      function getSlotWinAssetUrl() {
-        var rel = (slotWinSfx && slotWinSfx.getAttribute("src")) || "src/slot-win.wav";
-        try {
-          return new URL(rel, window.location.href).href;
-        } catch (e) {
-          return rel;
-        }
-      }
-
-      /** Fetch + decode win WAV into memory (call from user gesture so decode + context are allowed). */
-      function primeSlotWinBuffer() {
-        if (slotWinAudioBuffer || slotWinDecodePromise) return slotWinDecodePromise;
-        var ctx = ensureReelSpinCtx();
-        if (!ctx) return Promise.resolve();
-        ctx.resume().catch(function () {});
-        var url = getSlotWinAssetUrl();
-        slotWinDecodePromise = fetch(url)
-          .then(function (r) {
-            if (!r.ok) throw new Error("win wav " + r.status);
-            return r.arrayBuffer();
-          })
-          .then(function (ab) {
-            return ctx.decodeAudioData(ab.slice(0));
-          })
-          .then(function (buf) {
-            slotWinAudioBuffer = buf;
-            return buf;
-          })
-          .catch(function () {
-            slotWinDecodePromise = null;
-          });
-        return slotWinDecodePromise;
       }
 
       /**
@@ -1730,80 +1781,28 @@
       }
 
       function stopSlotWinSound() {
-        if (!slotWinSfx) return;
         slotWinSfx.pause();
         slotWinSfx.currentTime = 0;
       }
 
-      function playSlotWinFromBuffer(ctx) {
-        if (!slotWinAudioBuffer) return false;
-        try {
-          var g = ctx.createGain();
-          g.gain.value = 0.9;
-          var src = ctx.createBufferSource();
-          src.buffer = slotWinAudioBuffer;
-          src.connect(g);
-          g.connect(ctx.destination);
-          src.start(0);
-          return true;
-        } catch (e) {
-          return false;
-        }
-      }
-
       function playSlotWinSound() {
         if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-        function tryHtml5Audio() {
-          if (!slotWinSfx) return;
-          stopSlotWinSound();
-          slotWinSfx.muted = false;
-          slotWinSfx.volume = 1;
-          var playP = slotWinSfx.play();
-          if (playP && playP.catch) playP.catch(function () {});
-        }
-        var ctx = ensureReelSpinCtx();
-        if (!ctx) {
-          tryHtml5Audio();
-          return;
-        }
-        function attemptBuffer() {
-          ctx.resume().catch(function () {});
-          if (playSlotWinFromBuffer(ctx)) return;
-          tryHtml5Audio();
-        }
-        if (slotWinAudioBuffer) {
-          attemptBuffer();
-          return;
-        }
-        if (slotWinDecodePromise && slotWinDecodePromise.then) {
-          slotWinDecodePromise.then(function () {
-            attemptBuffer();
-          }).catch(function () {
-            tryHtml5Audio();
-          });
-          return;
-        }
-        tryHtml5Audio();
+        stopSlotWinSound();
+        slotWinSfx.volume = 1;
+        var playP = slotWinSfx.play();
+        if (playP && playP.catch) playP.catch(function () {});
       }
 
-      /**
-       * Resume Web Audio + start decoding win WAV (must run during a user tap).
-       * Do not call slotWinSfx.load() here — it aborts an in-flight <audio> unlock/play.
-       */
       function primeReelAudio() {
         var c = ensureReelSpinCtx();
         if (c) c.resume().catch(function () {});
-        primeSlotWinBuffer();
+        slotWinSfx.load();
       }
-
-      tapBtn.addEventListener("pointerdown", primeReelAudio);
-      reel.addEventListener("pointerdown", primeReelAudio);
+      tapBtn.addEventListener("pointerdown", primeReelAudio, { once: true });
+      reel.addEventListener("pointerdown", primeReelAudio, { once: true });
 
       function runSwirlThenAdvance(nextIndex, onDone) {
         if (busy) return;
-        if (nextIndex === 2) {
-          primeSlotWinBuffer();
-        }
         if (index === 2) {
           stopSlotWinSound();
         }
@@ -1926,7 +1925,48 @@
         }
       })();
 
-      startExperience();
+      function beginExperienceAfterAudioGate() {
+        startExperience();
+      }
+
+      (function setupAudioPrimeGate() {
+        if (document.documentElement.classList.contains("audio-prime-skip")) {
+          beginExperienceAfterAudioGate();
+          return;
+        }
+        var ov = document.getElementById("audioPrimeOverlay");
+        var btn = document.getElementById("audioPrimeBtn");
+        if (!ov || !btn) {
+          beginExperienceAfterAudioGate();
+          return;
+        }
+        var gateDone = false;
+        function dismiss() {
+          if (gateDone) return;
+          gateDone = true;
+          try {
+            sessionStorage.setItem("wish-audio-primed", "1");
+          } catch (e) {}
+          document.documentElement.classList.add("audio-prime-skip");
+          primeReelAudio();
+          ov.classList.add("is-dimming");
+          window.setTimeout(function () {
+            if (ov.parentNode) ov.parentNode.removeChild(ov);
+            beginExperienceAfterAudioGate();
+          }, 400);
+        }
+        btn.addEventListener("pointerdown", dismiss);
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          dismiss();
+        });
+        btn.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            dismiss();
+          }
+        });
+      })();
     })();
   </script>
 </body>
